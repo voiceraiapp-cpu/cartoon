@@ -1,49 +1,51 @@
-from cartoon_diffusion import CartoonDiffusionPipeline
-from fastapi import FastAPI, File, UploadFile
-from PIL import Image
-import io
-from starlette.responses import Response
+from flask import Flask, request, send_file, jsonify
+import cv2
+import numpy as np
+import tempfile
 
-app = FastAPI()
+app = Flask(__name__)
 
-# Initialize the pipeline
-pipeline = CartoonDiffusionPipeline.from_pretrained("wizcodes12/image_to_cartoonify")
+def cartoonize_image(img):
+    # Convert to gray
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    gray = cv2.medianBlur(gray, 5)
 
-@app.get("/")
-async def root():
-    return {"message": "Cartoonify API is running!"}
+    # Edge mask
+    edges = cv2.adaptiveThreshold(
+        gray, 255,
+        cv2.ADAPTIVE_THRESH_MEAN_C,
+        cv2.THRESH_BINARY, 9, 9
+    )
 
-@app.post("/cartoonify")
-async def cartoonify(file: UploadFile = File(...)):
-    try:
-        # Read and process the uploaded image
-        img = Image.open(file.file)
-        cartoon = pipeline(img)
-        output = io.BytesIO()
-        cartoon.save(output, format="PNG")
-        return Response(content=output.getvalue(), media_type="image/png")
-    except Exception as e:
-        return {"error": str(e)}
+    # Smooth color
+    color = cv2.bilateralFilter(img, 9, 250, 250)
 
-@app.post("/cartoonify-advanced")
-async def cartoonify_advanced(
-    file: UploadFile = File(...),
-    hair_color: float = 0.5,
-    glasses: float = 0.0,
-    facial_hair: float = 0.0
-):
-    try:
-        img = Image.open(file.file)
-        cartoon = pipeline(
-            img,
-            hair_color=hair_color,
-            glasses=glasses,
-            facial_hair=facial_hair,
-            num_inference_steps=50,
-            guidance_scale=7.5
-        )
-        output = io.BytesIO()
-        cartoon.save(output, format="PNG")
-        return Response(content=output.getvalue(), media_type="image/png")
-    except Exception as e:
-        return {"error": str(e)}
+    # Combine edges + color
+    cartoon = cv2.bitwise_and(color, color, mask=edges)
+    return cartoon
+
+@app.route("/", methods=["GET"])
+def home():
+    return jsonify({"message": "Cartoonizer API is running! Use POST /cartoonize with an image."})
+
+@app.route("/cartoonize", methods=["POST"])
+def cartoonize():
+    if 'image' not in request.files:
+        return jsonify({"error": "No image uploaded"}), 400
+    
+    file = request.files['image']
+    img = cv2.imdecode(np.frombuffer(file.read(), np.uint8), cv2.IMREAD_COLOR)
+    
+    if img is None:
+        return jsonify({"error": "Invalid image"}), 400
+
+    cartoon = cartoonize_image(img)
+
+    # Save to temp file
+    temp = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
+    cv2.imwrite(temp.name, cartoon)
+
+    return send_file(temp.name, mimetype='image/jpeg')
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
