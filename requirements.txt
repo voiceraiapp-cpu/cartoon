@@ -1,13 +1,4 @@
-torch==2.0.1
-torchvision==0.15.2
-torchaudio==2.0.2
-diffusers==0.30.3
-transformers==4.55.2
-accelerate==1.10.0
-mediapipe==0.10.14
-opencv-python==4.10.0.84
-pillow==10.4.0
-numpy==1.24.4
-fastapi==0.115.4
-uvicorn==0.32.0
-python-multipart==0.0.12
+flask
+opencv-python-headless
+numpy
+gunicorn
