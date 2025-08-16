@@ -1,0 +1,13 @@
+torch
+torchvision
+torchaudio
+diffusers
+transformers
+accelerate
+mediapipe
+opencv-python
+pillow
+numpy
+gradio
+fastapi
+uvicorn
