@@ -1,7 +1,7 @@
-flask
-torch
-torchvision
-pillow
-facenet-pytorch
-numpy
-opencv-python
+flask==3.0.3
+torch==2.2.2
+torchvision==0.17.2
+pillow==10.3.0
+facenet-pytorch==2.5.3
+numpy==1.26.4
+opencv-python-headless==4.9.0.80
