@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: cartoon
+    name: cartoon-app
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt
@@ -8,4 +8,4 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: "3.12.7"
-    autoDeploy: false
+    autoDeploy: true
