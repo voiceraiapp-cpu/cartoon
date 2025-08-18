@@ -5,6 +5,7 @@ from PIL import Image
 import numpy as np
 from facenet_pytorch import MTCNN
 import os
+import sys
 
 app = Flask(__name__)
 
@@ -17,31 +18,95 @@ scene_model = None
 face2paint = None
 mtcnn = None
 
+def download_models():
+    """Download models during build/startup"""
+    print("🔄 Downloading models...")
+    try:
+        # Set torch hub cache directory
+        torch.hub.set_dir('./models')
+        
+        # Download models with retry logic
+        import time
+        max_retries = 3
+        retry_delay = 10
+        
+        for attempt in range(max_retries):
+            try:
+                print(f"📥 Attempt {attempt + 1}: Downloading face model...")
+                face_model = torch.hub.load(
+                    "bryandlee/animegan2-pytorch:main",
+                    "generator",
+                    pretrained="face_paint_512_v2",
+                    force_reload=False  # Use cached if available
+                )
+                
+                print(f"📥 Attempt {attempt + 1}: Downloading scene model...")
+                scene_model = torch.hub.load(
+                    "bryandlee/animegan2-pytorch:main",
+                    "generator",
+                    pretrained="paprika",
+                    force_reload=False
+                )
+                
+                print(f"📥 Attempt {attempt + 1}: Downloading face2paint...")
+                face2paint = torch.hub.load(
+                    "bryandlee/animegan2-pytorch:main",
+                    "face2paint",
+                    size=512,
+                    force_reload=False
+                )
+                
+                print("✅ All models downloaded successfully!")
+                return face_model, scene_model, face2paint
+                
+            except Exception as e:
+                print(f"❌ Attempt {attempt + 1} failed: {e}")
+                if attempt < max_retries - 1:
+                    print(f"⏳ Retrying in {retry_delay} seconds...")
+                    time.sleep(retry_delay)
+                else:
+                    raise e
+                    
+    except Exception as e:
+        print(f"❌ Failed to download models after {max_retries} attempts: {e}")
+        raise e
+
 def load_models():
     """Load models only when needed"""
     global face_model, scene_model, face2paint, mtcnn
     
     if face_model is None:
         try:
-            # Face-focused model (sharp eyes/mouth)
+            # Try to load from cache first
+            torch.hub.set_dir('./models')
+            
+            # Check if models exist in cache
+            cache_dir = torch.hub.get_dir()
+            if not os.path.exists(cache_dir):
+                os.makedirs(cache_dir, exist_ok=True)
+            
+            print("🔄 Loading models...")
+            
+            # Load models (will use cache if available)
             face_model = torch.hub.load(
                 "bryandlee/animegan2-pytorch:main",
                 "generator",
-                pretrained="face_paint_512_v2"
+                pretrained="face_paint_512_v2",
+                force_reload=False
             ).to(device).eval()
             
-            # Full-scene model (Paprika style)
             scene_model = torch.hub.load(
                 "bryandlee/animegan2-pytorch:main",
                 "generator",
-                pretrained="paprika"
+                pretrained="paprika",
+                force_reload=False
             ).to(device).eval()
             
-            # Helper
             face2paint = torch.hub.load(
                 "bryandlee/animegan2-pytorch:main",
                 "face2paint",
-                size=512
+                size=512,
+                force_reload=False
             )
             
             # Face detector
@@ -54,6 +119,16 @@ def load_models():
             raise e
 
 # =========================
+# 🔹 Download models at startup (for production)
+# =========================
+if not os.environ.get('FLASK_ENV') == 'development':
+    try:
+        download_models()
+    except Exception as e:
+        print(f"⚠️ Warning: Could not pre-download models: {e}")
+        print("🔄 Models will be downloaded on first request instead")
+
+# =========================
 # 🔹 API Routes
 # =========================
 
@@ -62,6 +137,8 @@ def home():
     return jsonify({
         "message": "AnimeGANv2 Cartoonizer API",
         "status": "running",
+        "device": str(device),
+        "models_loaded": face_model is not None,
         "endpoints": {
             "/anime-gan?style=face": "Anime style (best for portraits, sharp eyes/mouth)",
             "/anime-gan?style=paprika": "Anime style (best for full scenes, Studio Ghibli vibe)"
@@ -70,19 +147,46 @@ def home():
 
 @app.route("/health", methods=["GET"])
 def health_check():
-    return jsonify({"status": "healthy", "message": "Service is running"})
+    return jsonify({
+        "status": "healthy", 
+        "message": "Service is running",
+        "models_loaded": face_model is not None,
+        "device": str(device)
+    })
 
 @app.route("/test", methods=["GET"])
 def test():
-    return jsonify({"status": "API is working!", "message": "AnimeGANv2 is ready"})
+    return jsonify({
+        "status": "API is working!", 
+        "message": "AnimeGANv2 is ready",
+        "models_ready": face_model is not None
+    })
+
+@app.route("/load-models", methods=["POST"])
+def load_models_endpoint():
+    """Endpoint to manually trigger model loading"""
+    try:
+        load_models()
+        return jsonify({"message": "Models loaded successfully!", "status": "success"})
+    except Exception as e:
+        return jsonify({"error": f"Failed to load models: {str(e)}"}), 500
 
 @app.route("/anime-gan", methods=["POST"])
 def anime_gan():
-    # Load models on first request
+    # Load models on first request with better error handling
     try:
-        load_models()
+        if face_model is None:
+            print("🔄 Loading models on first request...")
+            load_models()
     except Exception as e:
-        return jsonify({"error": f"Failed to load models: {str(e)}"}), 500
+        error_msg = str(e)
+        if "rate limit" in error_msg.lower():
+            return jsonify({
+                "error": "Service temporarily unavailable due to model download limits. Please try again in a few minutes.",
+                "details": "The AI models are being downloaded and there's a temporary rate limit. This usually resolves quickly."
+            }), 503
+        else:
+            return jsonify({"error": f"Failed to load models: {error_msg}"}), 500
     
     if 'image' not in request.files:
         return jsonify({"error": "No image uploaded"}), 400
@@ -137,4 +241,5 @@ def anime_gan():
 # =========================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    debug_mode = os.environ.get("FLASK_ENV") == "development"
+    app.run(host="0.0.0.0", port=port, debug=debug_mode)
