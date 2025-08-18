@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: cartoon-app
+    name: cartoon
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt
