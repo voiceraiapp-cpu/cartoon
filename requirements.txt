@@ -1,4 +1,4 @@
-Flask==2.3.3
-gradio-client==0.4.3
-requests==2.32.0
-Pillow==10.0.0
+Flask
+gradio-client
+requests
+Pillow
